@@ -1,0 +1,5 @@
+substitutions:
+  name: nous-kitchen
+  friendly_name: Nous Kitchen
+
+<<: !include devices/nous.yaml

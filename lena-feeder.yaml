@@ -1,0 +1,542 @@
+substitutions:
+  name: lena-feeder
+  friendly_name: Lena Feeder
+
+  CONFIG_TIMEZONE: "Europe/Amsterdam"
+  CONFIG_DISPENSE_UOM: "portions" # g, kg, oz, portions, cups, etc.
+  CONFIG_DISPENSE_MIN_AMOUNT: "1"
+  CONFIG_DISPENSE_MAX_AMOUNT: "6"
+  CONFIG_DISPENSE_AMOUNT_STEP: "1"
+
+  # Do not change substitutions below this line
+  TAG: "dispenser" # Tag to distinguish our logs from other components
+  STATUS_DISPENSED: "0"
+  STATUS_FAILED: "1"
+  STATUS_DISPENSING: "254"
+  STATUS_PENDING: "255"
+  MANUAL_DISPENSE_ID: "255"
+  MAX_ENTRIES: "10"
+
+packages:
+  base: !include common/base.yaml
+
+esphome:
+  on_boot:
+    then:
+      - light.turn_on:
+          id: led
+          effect: fast_blink
+      - script.execute: restore_schedule
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+globals:
+  - id: schedule
+    # map<id, {hour, minute, amount, status}>
+    type: std::map<int, std::array<int, 4>>
+    restore_value: False
+  - id: schedule_storage
+    type: int[50] # 10 entries * 5 values per entry
+    restore_value: True
+  - id: amount_dispensed_today
+    type: int
+    restore_value: True
+    initial_value: "0"
+  - id: manual_dispense_amount
+    type: int
+    restore_value: True
+    initial_value: "1"
+  - id: active_entry
+    type: int
+    initial_value: "${MANUAL_DISPENSE_ID}"
+    restore_value: False
+  - id: last_dispense_timestamp
+    type: int
+    initial_value: "0"
+    restore_value: True
+  - id: scoops_dispensed
+    type: int
+    initial_value: "0"
+    restore_value: False
+  - id: scoops_expected
+    type: int
+    initial_value: "0"
+    restore_value: False
+  - id: food_sensor_count
+    type: int
+    initial_value: "0"
+    restore_value: False
+
+logger:
+  baud_rate: 0
+
+api:
+  services:
+    - service: dispense
+      variables:
+        amount: int
+      then:
+        - globals.set:
+            id: active_entry
+            value: "${MANUAL_DISPENSE_ID}"
+        - script.execute:
+            id: start_dispense
+            amount: !lambda return amount;
+    - service: set_scheduled_dispense
+      variables:
+        id: int
+        hour: int
+        minute: int
+        amount: int
+      then:
+        - logger.log:
+            format: "Setting scheduled dispense for entry %d at %02d:%02d with %d ${CONFIG_DISPENSE_UOM}"
+            args: [id, hour, minute, amount]
+            tag: ${TAG}
+            level: INFO
+        - if:
+            condition:
+              lambda: return id >= ${MAX_ENTRIES};
+            then:
+              - logger.log:
+                  format: "Maximum of ${MAX_ENTRIES} schedule entries supported"
+                  tag: ${TAG}
+                  level: ERROR
+            else:
+              - lambda: id(schedule)[id] = {hour, minute, amount, ${STATUS_PENDING}};
+              - component.update: schedule_text_sensor
+              - script.execute: save_schedule
+    - service: remove_scheduled_dispense
+      variables:
+        id: int
+      then:
+        if:
+          condition:
+            lambda: return id(schedule).find(id) != id(schedule).end();
+          then:
+            - logger.log:
+                format: "Removing scheduled dispense for entry %d"
+                args: [id]
+                tag: ${TAG}
+                level: INFO
+            - lambda: id(schedule).erase(id);
+            - component.update: schedule_text_sensor
+            - script.execute: save_schedule
+          else:
+            - logger.log:
+                format: "Entry %d not found in schedule"
+                args: [id]
+                tag: ${TAG}
+                level: WARN
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${CONFIG_TIMEZONE}
+    on_time_sync:
+      then:
+        # if we're no longer in the same day as the last dispense attempt,
+        # most likely we were powered off at midnight when `reset_day` tried to run,
+        # so we should reset the day statistics again just in case
+        if:
+          condition:
+            lambda: return (id(sntp_time).now().timestamp / 86400) != (id(last_dispense_timestamp) / 86400);
+          then:
+            - logger.log:
+                format: "Detected a new day since last dispense"
+                tag: ${TAG}
+                level: INFO
+            - script.execute: reset_day
+    on_time:
+      - hours: "*"
+        minutes: "*"
+        seconds: 0
+        then:
+          script.execute: check_schedule
+      - hours: 0
+        minutes: 0
+        seconds: 0
+        then:
+          script.execute: reset_day
+
+light:
+  - platform: binary
+    id: led
+    output: led_output
+    effects:
+      - strobe:
+          name: fast_blink
+          colors:
+            - state: True
+              duration: 125ms
+            - state: False
+              duration: 125ms
+    internal: True
+
+output:
+  - id: led_output
+    platform: gpio
+    pin: GPIO5
+  - platform: ledc
+    pin: GPIO16
+    id: rtttl_output
+
+rtttl:
+  output: rtttl_output
+
+interval:
+  - interval: 1s
+    then:
+      if:
+        condition:
+          wifi.connected:
+        then:
+          - light.turn_on:
+              id: led
+              effect: None
+        else:
+          - light.turn_on:
+              id: led
+              effect: fast_blink
+
+script:
+  - id: start_dispense
+    parameters:
+      amount: int
+    then:
+      - globals.set:
+          id: last_dispense_timestamp
+          value: !lambda return id(sntp_time).now().timestamp;
+      - script.execute:
+          id: update_schedule_status
+          status: ${STATUS_DISPENSING}
+      - lambda: |-
+          id(play_rtttl)->execute("two_shorts:d=4,o=5,b=100:16e6,16e6");
+          id(scoops_dispensed) = 0;
+          id(scoops_expected) = amount;
+          id(food_sensor_count) = 0;
+      - switch.turn_on: feed_forward
+      - homeassistant.event:
+          event: esphome.lena_feeder_dispensing
+  - id: end_dispense
+    parameters:
+      dispensed: int
+      status: int
+    then:
+      - lambda: id(amount_dispensed_today) = id(amount_dispensed_today) + dispensed;
+      - component.update: amount_dispensed_today_sensor
+      - script.execute:
+          id: update_schedule_status
+          status: !lambda return status;
+      - script.execute: save_schedule
+      - logger.log:
+          format: "Dispensed %d ${CONFIG_DISPENSE_UOM} for entry %d with status %d"
+          args: [dispensed, id(active_entry), status]
+          tag: ${TAG}
+          level: INFO
+  - id: update_schedule_status
+    parameters:
+      status: int
+    then:
+      - if:
+          condition:
+            lambda: return id(schedule).find(id(active_entry)) != id(schedule).end();
+          then:
+            - logger.log:
+                format: "Updating schedule status for entry %d to %d"
+                args: [id(active_entry), status]
+                tag: ${TAG}
+                level: DEBUG
+            - lambda: id(schedule)[id(active_entry)][3] = status;
+            - component.update: schedule_text_sensor
+          else:
+            - if:
+                condition:
+                  lambda: return id(active_entry) != ${MANUAL_DISPENSE_ID};
+                then:
+                  - logger.log:
+                      format: "Entry %d not found in schedule"
+                      args: [id(active_entry)]
+                      tag: ${TAG}
+                      level: WARN
+  - id: check_schedule
+    then:
+      - lambda: |-
+          ESP_LOGV("${TAG}", "Checking schedule");
+          auto now = id(sntp_time).now();
+          for (auto &entry : id(schedule)) {
+            if (now.hour == entry.second[0] && now.minute == entry.second[1]) {
+              ESP_LOGI("${TAG}", "Dispensing %d ${CONFIG_DISPENSE_UOM} for entry %d", entry.second[2], entry.first);
+              id(active_entry) = entry.first;
+              id(start_dispense).execute(entry.second[2]);
+              return;
+            }
+          }
+          ESP_LOGV("${TAG}", "No scheduled dispense found at %02d:%02d", now.hour, now.minute);
+  - id: reset_day
+    then:
+      - logger.log:
+          format: "Resetting daily statistics"
+          tag: ${TAG}
+          level: INFO
+      - lambda: |-
+          for (auto &entry : id(schedule)) {
+            entry.second[3] = ${STATUS_PENDING};
+          }
+      - component.update: schedule_text_sensor
+      - globals.set:
+          id: amount_dispensed_today
+          value: "0"
+      - component.update: amount_dispensed_today_sensor
+      - script.execute: save_schedule
+  - id: save_schedule
+    then:
+      - logger.log:
+          format: "Saving schedule to flash storage"
+          tag: ${TAG}
+          level: VERBOSE
+      - lambda: |-
+          for (int i = 0; i < 10; i++) {
+            int offset = i * 5;
+            auto it = id(schedule).find(i);
+            if (it == id(schedule).end()) {
+              id(schedule_storage)[offset + 0] = i;
+              id(schedule_storage)[offset + 1] = 255;
+              id(schedule_storage)[offset + 2] = 255;
+              id(schedule_storage)[offset + 3] = 255;
+              id(schedule_storage)[offset + 4] = 255;
+            } else {
+              id(schedule_storage)[offset + 0] = it->first;
+              id(schedule_storage)[offset + 1] = it->second[0];
+              id(schedule_storage)[offset + 2] = it->second[1];
+              id(schedule_storage)[offset + 3] = it->second[2];
+              id(schedule_storage)[offset + 4] = it->second[3];
+            }
+          }
+  - id: restore_schedule
+    then:
+      - logger.log:
+          format: "Loading schedule from flash storage"
+          tag: ${TAG}
+          level: INFO
+      - lambda: |-
+          id(schedule).clear();
+          for (int i = 0; i < 10; i++) {
+            int offset = i * 5;
+            if (id(schedule_storage)[offset + 0] != i
+             || id(schedule_storage)[offset + 3] < ${CONFIG_DISPENSE_MIN_AMOUNT}
+             || id(schedule_storage)[offset + 3] > ${CONFIG_DISPENSE_MAX_AMOUNT}
+            ) {
+              continue;
+            }
+
+            id(schedule)[id(schedule_storage)[offset + 0]] = {
+              id(schedule_storage)[offset + 1],
+              id(schedule_storage)[offset + 2],
+              id(schedule_storage)[offset + 3],
+              id(schedule_storage)[offset + 4]
+            };
+          }
+      - component.update: schedule_text_sensor
+  - id: play_rtttl
+    parameters:
+      song: string
+    then:
+      - if:
+          condition:
+            lambda: return !(id(mute_sounds).state);
+          then:
+            - rtttl.play:
+                rtttl: !lambda "return song;"
+  - id: check_dispension
+    then:
+      - if:
+          condition:
+            lambda: return (id(food_sensor_count) / id(scoops_expected)) >= id(low_food_threshold).state;
+          then:
+            - script.execute:
+                id: end_dispense
+                dispensed: !lambda return id(scoops_expected);
+                status: ${STATUS_DISPENSED}
+            - binary_sensor.template.publish:
+                id: low_food_level
+                state: OFF
+            - script.execute:
+                id: play_rtttl
+                song: "one_short:d=4,o=5,b=100:16e6"
+          else:
+            - script.execute:
+                id: end_dispense
+                dispensed: !lambda return id(scoops_expected);
+                status: ${STATUS_FAILED}
+            - binary_sensor.template.publish:
+                id: low_food_level
+                state: ON
+            - script.execute:
+                id: play_rtttl
+                song: "final_countdown:d=16,o=5,b=125:b,a,4b,4e,4p,8p,c6,b,8c6,8b,4a,4p,8p,c6,b,4c6,4e,4p,8p,a,g,8a,8g,8f#,8a,4g."
+
+text_sensor:
+  - platform: template
+    id: schedule_text_sensor
+    name: "Schedule"
+    lambda: |-
+      std::string schedule_str;
+      for (auto &entry : id(schedule)) {
+        schedule_str += str_sprintf("%d,%d,%d,%d,%d ",
+                                    entry.first,
+                                    entry.second[0],
+                                    entry.second[1],
+                                    entry.second[2],
+                                    entry.second[3]);
+      }
+      if (!schedule_str.empty()) {
+        schedule_str.pop_back(); // Remove the trailing space
+      }
+      return schedule_str;
+
+sensor:
+  - platform: template
+    name: "Dispensed Today"
+    id: amount_dispensed_today_sensor
+    unit_of_measurement: "${CONFIG_DISPENSE_UOM}"
+    accuracy_decimals: 0
+    lambda: |-
+      return id(amount_dispensed_today);
+
+uart:
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 9600
+
+binary_sensor:
+  - platform: template
+    name: "Low Food Level"
+    id: low_food_level
+    device_class: problem
+    icon: mdi:cookie-alert
+  - id: manual_feed_button
+    internal: true
+    platform: gpio
+    pin:
+      number: GPIO34
+      inverted: true
+    on_press:
+      then:
+        - button.press: dispense_food
+  - id: motor_sensor
+    internal: true
+    platform: gpio
+    pin:
+      number: GPIO27
+      inverted: true
+    on_press:
+      then:
+        - lambda: id(scoops_dispensed) += 1;
+        - if:
+            condition:
+              lambda: return id(scoops_dispensed) >= id(scoops_expected);
+            then:
+              - switch.turn_off: feed_forward
+              - script.execute: check_dispension
+
+  - id: feed_sensor
+    internal: true
+    platform: gpio
+    pin:
+      number: GPIO14
+    on_press:
+      then:
+        - lambda: |-
+            id(food_sensor_count) += 1;
+
+button:
+  - platform: template
+    name: "Dispense food"
+    id: dispense_food
+    icon: mdi:food-turkey
+    on_press:
+      then:
+        - globals.set:
+            id: active_entry
+            value: "${MANUAL_DISPENSE_ID}"
+        - script.execute:
+            id: start_dispense
+            amount: !lambda return id(manual_dispense_amount);
+
+number:
+  - platform: template
+    name: "Manual Dispense Amount"
+    id: manual_dispense_amount_sensor
+    min_value: ${CONFIG_DISPENSE_MIN_AMOUNT}
+    max_value: ${CONFIG_DISPENSE_MAX_AMOUNT}
+    step: ${CONFIG_DISPENSE_AMOUNT_STEP}
+    lambda: return id(manual_dispense_amount);
+    unit_of_measurement: "${CONFIG_DISPENSE_UOM}"
+    entity_category: config
+    set_action:
+      globals.set:
+        id: manual_dispense_amount
+        value: !lambda return x;
+  - platform: template
+    id: low_food_threshold
+    # Minimum food quantity per scoop (specific to a particular dry food).
+    name: "Low food threshold"
+    icon: mdi:cup-outline
+    entity_category: config
+    min_value: 1
+    max_value: 10
+    initial_value: 5
+    optimistic: true
+    step: 1
+    restore_value: true
+    unit_of_measurement: "${CONFIG_DISPENSE_UOM}"
+    mode: slider
+
+switch:
+  - id: mute_sounds
+    name: Mute sounds
+    icon: mdi:volume-off
+    optimistic: true
+    platform: template
+    restore_mode: RESTORE_DEFAULT_OFF
+  - id: enable_sensors
+    internal: true
+    platform: gpio
+    pin:
+      number: GPIO33
+    restore_mode: ALWAYS_ON
+    disabled_by_default: true
+
+  - id: enable_feeder_motor
+    internal: true
+    platform: gpio
+    pin:
+      number: GPIO19
+    restore_mode: ALWAYS_OFF
+    disabled_by_default: true
+
+  - id: feed_forward
+    internal: true
+    interlock: &interlock_group [feed_forward, feed_reverse]
+    platform: gpio
+    pin:
+      number: GPIO18
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - switch.turn_on: enable_feeder_motor
+    on_turn_off:
+      then:
+        - switch.turn_off: enable_feeder_motor
+
+  - id: feed_reverse
+    internal: true
+    interlock: *interlock_group
+    platform: gpio
+    pin:
+      number: GPIO17
+    restore_mode: ALWAYS_OFF

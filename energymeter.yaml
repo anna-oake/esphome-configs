@@ -1,0 +1,72 @@
+substitutions:
+  name: energymeter
+  friendly_name: Energy Meter
+
+packages:
+  base: !include common/base.yaml
+
+esp8266:
+  board: d1_mini
+  restore_from_flash: true
+
+logger:
+  baud_rate: 0
+
+uart:
+  baud_rate: 115200
+  rx_pin: D7
+  rx_buffer_size: 1700
+
+dsmr:
+  id: dsmr_instance
+  max_telegram_length: 1700
+
+sensor:
+  - platform: dsmr
+    energy_delivered_tariff1:
+      name: "Energy Consumed Tariff 1"
+      state_class: total_increasing
+    energy_delivered_tariff2:
+      name: "Energy Consumed Tariff 2"
+      state_class: total_increasing
+    power_delivered:
+      name: "Power Consumed"
+      accuracy_decimals: 3
+    electricity_failures:
+      name: "Electricity Failures"
+      icon: mdi:alert
+    electricity_long_failures:
+      name: "Long Electricity Failures"
+      icon: mdi:alert
+    voltage_l1:
+      name: "Voltage Phase 1"
+    current_l1:
+      name: "Current Phase 1"
+    power_delivered_l1:
+      name: "Power Consumed Phase 1"
+      accuracy_decimals: 3
+    gas_delivered:
+      name: "Gas Consumed"
+      state_class: total_increasing
+  - platform: uptime
+    name: "SlimmeLezer Uptime"
+  - platform: wifi_signal
+    name: "SlimmeLezer Wi-Fi Signal"
+    update_interval: 60s
+
+text_sensor:
+  - platform: dsmr
+    identification:
+      name: "DSMR Identification"
+    p1_version:
+      name: "DSMR Version"
+  - platform: wifi_info
+    ip_address:
+      name: "SlimmeLezer IP Address"
+    ssid:
+      name: "SlimmeLezer Wi-Fi SSID"
+    bssid:
+      name: "SlimmeLezer Wi-Fi BSSID"
+  - platform: version
+    name: "ESPHome Version"
+    hide_timestamp: true

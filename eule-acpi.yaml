@@ -1,0 +1,94 @@
+substitutions:
+  name: eule-acpi
+  friendly_name: Eule ACPI
+
+packages:
+  base: !include common/base.yaml
+
+esp8266:
+  board: d1_mini
+
+esphome:
+  on_boot:
+    then:
+      - lambda: |-
+          pinMode(D1, INPUT);
+          pinMode(D2, INPUT);
+
+binary_sensor:
+  - platform: gpio
+    id: active
+    internal: true
+    pin:
+      number: D5
+    filters:
+      - delayed_off: 300ms
+    on_state:
+      - component.update: state
+  - platform: gpio
+    id: sleeping
+    internal: true
+    pin:
+      number: D6
+    filters:
+      - delayed_off: 300ms
+    on_state:
+      - component.update: state
+
+text_sensor:
+  - platform: template
+    id: state
+    name: State
+    icon: mdi:desktop-classic
+    lambda: |-
+      if (id(active).state) {
+        return {"On"};
+      } else if (id(sleeping).state) {
+        return {"Sleeping"};
+      } else {
+        return {"Off"};
+      }
+    update_interval: 30s
+
+script:
+  - id: press_button
+    parameters:
+      pin: int
+      delay_ms: int
+    mode: single
+    then:
+      - lambda: |-
+          pinMode(pin, OUTPUT);
+          digitalWrite(pin, LOW);
+      - delay: !lambda return delay_ms;
+      - lambda: |-
+          pinMode(pin, INPUT);
+
+button:
+  - platform: template
+    name: Power
+    icon: mdi:power
+    on_press:
+      then:
+        - script.execute:
+            id: press_button
+            pin: D1
+            delay_ms: 100
+  - platform: template
+    name: Hold Power
+    icon: mdi:lightning-bolt
+    on_press:
+      then:
+        - script.execute:
+            id: press_button
+            pin: D1
+            delay_ms: 5000
+  - platform: template
+    name: Reset
+    icon: mdi:restart
+    on_press:
+      then:
+        - script.execute:
+            id: press_button
+            pin: D2
+            delay_ms: 100

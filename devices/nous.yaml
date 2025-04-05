@@ -1,0 +1,148 @@
+substitutions:
+  max_power: "2000"
+  current_res: "0.00126"
+  voltage_div: "1570"
+
+packages:
+  base: !include ../common/base.yaml
+
+esphome:
+  on_boot:
+    priority: 200
+    then:
+      - if:
+          condition:
+            switch.is_on: relay
+          then:
+            - light.turn_on: led
+          else:
+            - light.turn_off: led
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # @grigi found in testing that these options resulted in better responsiveness.
+      # BLE 4.2 is supported by ALL ESP32 boards that have bluetooth, the original and derivatives.
+      CONFIG_BT_BLE_42_FEATURES_SUPPORTED: y
+      # Extend the watchdog timeout, so the device reboots if the device appears locked up for over 10 seconds.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+logger:
+  baud_rate: 0
+
+api:
+  on_client_connected:
+    - esp32_ble_tracker.start_scan:
+        continuous: true
+  on_client_disconnected:
+    if:
+      condition:
+        not:
+          api.connected:
+      then:
+        - esp32_ble_tracker.stop_scan:
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Don't auto start BLE scanning, we control it in the `api` block's automation.
+    continuous: False
+
+    active: True # send scan-request packets to gather more info, like device name for some devices.
+
+    interval: 320ms # default 320ms - how long to spend on each advert channel
+    window: 300ms # default 30ms - how long to actually "listen" in each interval. Reduce this if device is unstable.
+    # If the device cannot keep up or becomes unstable, reduce the "window" setting. This may be
+    # required if your device is controlling other sensors or doing PWM for lights etc.
+
+bluetooth_proxy:
+  active: true
+
+sensor:
+  - platform: uptime
+    name: "Uptime Sensor"
+    update_interval: 60s
+
+light:
+  - platform: status_led
+    internal: True
+    name: "Switch state"
+    id: led
+    pin:
+      number: GPIO02
+      inverted: true
+
+binary_sensor:
+  - platform: gpio
+    id: "push_button"
+    internal: true
+    pin:
+      number: GPIO04
+      inverted: yes
+      mode: INPUT_PULLUP
+    # on_press:
+    #   - switch.toggle: "relay"
+
+switch:
+  - platform: gpio
+    pin: GPIO13
+    id: relay
+    name: "Relay"
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:power
+    on_turn_on:
+      - light.turn_on: led
+    on_turn_off:
+      - light.turn_off: led
+# sensor:
+#   - platform: hlw8012
+#     model: BL0937
+#     sel_pin:
+#       number: GPIO14
+#       inverted: True
+#     cf_pin: GPIO27
+#     cf1_pin: GPIO26
+#     current_resistor: ${current_res}
+#     voltage_divider: ${voltage_div}
+#     change_mode_every: 1
+#     update_interval: 5s
+
+#     current:
+#       id: current
+#       name: "current"
+#       unit_of_measurement: A
+#       accuracy_decimals: 3
+#       icon: mdi:current-ac
+#       filters:
+#         - lambda: |-
+#             if (x < 0.01) return 0;
+#             else return x;
+
+#     voltage:
+#       id: voltage
+#       name: "voltage"
+#       unit_of_measurement: V
+#       accuracy_decimals: 1
+#       icon: mdi:flash-outline
+
+#     power:
+#       name: "power"
+#       id: power
+#       unit_of_measurement: W
+#       icon: mdi:flash-outline
+#       force_update: true
+#       filters:
+#         - calibrate_linear:
+#             - 0.0 -> 0.0
+#             - 24.50 -> 28.40
+#       on_value_range:
+#         - above: ${max_power}
+#           then:
+#             - switch.turn_off: relay
+#             - homeassistant.service:
+#                 service: persistent_notification.create
+#                 data:
+#                   title: Message from ${name}
+#                 data_template:
+#                   message: Switch turned off because power exceeded ${max_power}W
