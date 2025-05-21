@@ -1,0 +1,290 @@
+substitutions:
+  name: denon-sdl
+  friendly_name: Denon SDL
+
+packages:
+  base: !include common/host.yaml
+
+esphome:
+  on_boot:
+    then:
+      - lambda: |-
+          id(main_power).turn_on();
+
+globals:
+  - id: last_volume
+    type: float
+    restore_value: no
+    initial_value: "0"
+  - id: current_height
+    type: int
+    restore_value: no
+    initial_value: "64"
+  - id: spk
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+# external_components:
+#   - source:
+#       type: local
+#       path: components
+
+# uart:
+#   baud_rate: 9600
+#   port: "/dev/ttys001"
+
+# denonavr:
+
+number:
+  - platform: template
+    id: volume
+    name: Volume
+    min_value: 0
+    max_value: 98
+    step: 0.5
+    mode: slider
+    optimistic: true
+    initial_value: 88.5
+    on_value:
+      - component.update: oled
+      - if:
+          condition:
+            lambda: return (x != std::floor(x)) && (id(last_volume) == std::floor(id(last_volume)));
+          then:
+            - script.execute:
+                id: toggle_half
+                show: true
+      - if:
+          condition:
+            lambda: return (x == std::floor(x)) && (id(last_volume) != std::floor(id(last_volume)));
+          then:
+            - script.execute:
+                id: toggle_half
+                show: false
+      - globals.set:
+          id: last_volume
+          value: !lambda "return x;"
+
+switch:
+  - platform: template
+    id: main_power
+    name: Main Power
+    optimistic: true
+    on_turn_on:
+      - script.execute: choose_page
+    on_turn_off:
+      - script.execute: choose_page
+  - platform: template
+    id: main_mute
+    name: Main Mute
+    optimistic: true
+    on_turn_on:
+      - script.execute: choose_page
+    on_turn_off:
+      - script.execute: choose_page
+
+font:
+  - file: "fonts/seven-segment.ttf"
+    id: seg_48
+    size: 48
+    glyphs:
+      - "0123456789-"
+  - file: "fonts/seven-segment.ttf"
+    id: seg_32
+    size: 32
+    glyphs:
+      - ".5"
+  - file: 'https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_48
+    size: 48
+    glyphs:
+      - "\U000F19B2" # mdi-arrow-up-thin
+      - "\U000F19B3" # mdi-arrow-down-thin
+  - file: 'https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_24
+    size: 24
+    glyphs:
+      - "\U000F059F" # mdi-web
+      - "\U000F07F4" # mdi-television-classic
+      - "\U000F00B0" # mdi-bluetooth-audio
+      - "\U000F186B" # mdi-audio-input-rca
+      - "\U000F0025" # mdi-album
+
+display:
+  - platform: sdl
+    id: oled
+    update_interval: 10s
+    dimensions:
+      width: 128
+      height: 64
+    pages:
+      - id: page_blank
+        lambda: |-
+          it.fill(COLOR_OFF);
+      - id: page_mute
+        lambda: |-
+          it.print(-4, 0, id(seg_48), "---");
+      - id: page_volume
+        lambda: |-
+          it.printf(74, 0, id(seg_48), TextAlign::TOP_RIGHT, "%d", (int)id(volume).state);
+          if(id(current_height) <= 32) {
+            it.printf(74, id(current_height), id(seg_32), ".5");
+          }
+          it.print(128, 0, id(icon_24), TextAlign::TOP_RIGHT, "\U000F0025");
+      - id: page_input
+        lambda: |-
+          it.rectangle(20, 0, 15, 10);
+          it.rectangle(45, 0, 20, 10);
+          it.rectangle(75, 0, 15, 10);
+          it.rectangle(0, 16, 10, 10);
+          it.rectangle(20, 38, 15, 10);
+          it.rectangle(75, 38, 15, 10);
+
+          if(id(spk) > 0)
+            it.filled_rectangle(20, 0, 15, 10);
+          if(id(spk) > 1)
+            it.filled_rectangle(45, 0, 20, 10);
+          if(id(spk) > 2)
+            it.filled_rectangle(75, 0, 15, 10);
+          if(id(spk) > 3)
+            it.filled_rectangle(0, 16, 10, 10);
+          if(id(spk) > 4)
+            it.filled_rectangle(20, 38, 15, 10);
+          if(id(spk) > 5)
+            it.filled_rectangle(75, 38, 15, 10);
+          
+          it.print(128, 0, id(icon_48), TextAlign::TOP_RIGHT, "\U000F19B3");
+      - id: page_output
+        lambda: |-
+          it.rectangle(20, 0, 15, 10);
+          it.rectangle(45, 0, 20, 10);
+          it.rectangle(75, 0, 15, 10);
+          it.rectangle(0, 16, 10, 10);
+          it.rectangle(20, 38, 15, 10);
+          it.rectangle(75, 38, 15, 10);
+
+          if(id(spk) > 0)
+            it.filled_rectangle(20, 0, 15, 10);
+          if(id(spk) > 1)
+            it.filled_rectangle(45, 0, 20, 10);
+          if(id(spk) > 2)
+            it.filled_rectangle(75, 0, 15, 10);
+          if(id(spk) > 3)
+            it.filled_rectangle(0, 16, 10, 10);
+          if(id(spk) > 4)
+            it.filled_rectangle(20, 38, 15, 10);
+          if(id(spk) > 5)
+            it.filled_rectangle(75, 38, 15, 10);
+          
+          it.print(128, 0, id(icon_48), TextAlign::TOP_RIGHT, "\U000F19B2");
+
+script:
+  - id: choose_page
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(main_power).state) {
+            id(oled).show_page(id(page_blank));
+            return;
+          }
+          if (id(main_mute).state) {
+            id(oled).show_page(id(page_mute));
+            return;
+          }
+          id(oled).show_page(id(page_volume));
+      - component.update: oled
+  - id: toggle_half
+    parameters:
+      show: bool
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: "return id(current_height) != (show ? 16: 64);"
+          then:
+            - lambda: |-
+                if (show) {
+                  id(current_height) -= 8;
+                } else {
+                  id(current_height) += 8;
+                };
+            - component.update: oled
+            - delay: 5ms
+
+interval:
+  - interval: 0.3s
+    then:
+      - lambda: |-
+          if (id(spk) < 6) {
+            id(spk) += 1;
+          } else {
+            id(spk) = 0;
+          }
+      - component.update: oled
+
+binary_sensor:
+  - platform: sdl
+    id: button_1
+    key: SDLK_2
+    filters:
+      - autorepeat:
+          delay: 0.5s
+          time_off: 10ms
+          time_on: 100ms
+    on_press:
+      - number.increment:
+          id: volume
+  - platform: sdl
+    id: button_2
+    key: SDLK_1
+    filters:
+      - autorepeat:
+          delay: 0.5s
+          time_off: 10ms
+          time_on: 100ms
+    on_press:
+      - number.decrement:
+          id: volume
+  - platform: sdl
+    id: button_3
+    key: SDLK_4
+    filters:
+      - autorepeat:
+          delay: 0.5s
+          time_off: 10ms
+          time_on: 100ms
+    on_press:
+      - number.set:
+          id: volume
+          value: !lambda "return id(volume).state + 1;"
+  - platform: sdl
+    id: button_4
+    key: SDLK_3
+    filters:
+      - autorepeat:
+          delay: 0.5s
+          time_off: 10ms
+          time_on: 100ms
+    on_press:
+      - number.set:
+          id: volume
+          value: !lambda "return id(volume).state - 1;"
+  - platform: sdl
+    id: button_5
+    key: SDLK_m
+    on_press:
+      - switch.toggle: main_mute
+  - platform: sdl
+    id: button_6
+    key: SDLK_p
+    on_press:
+      - switch.toggle: main_power
+  - platform: sdl
+    id: button_7
+    key: SDLK_i
+    on_press:
+      - display.page.show: page_input
+      - component.update: oled
+    on_release:
+      - script.execute: choose_page

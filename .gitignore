@@ -4,3 +4,5 @@ secrets.yaml
 .esphome
 
 archive
+
+__pycache__

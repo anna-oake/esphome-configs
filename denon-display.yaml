@@ -1,0 +1,333 @@
+substitutions:
+  name: denon-display
+  friendly_name: Denon Display
+
+packages:
+  base: !include common/base.yaml
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+i2c:
+  sda: GPIO3
+  scl: GPIO4
+  frequency: 800kHz
+
+globals:
+  - id: last_volume
+    type: float
+    restore_value: no
+    initial_value: "0"
+  - id: current_height
+    type: int
+    restore_value: no
+    initial_value: "64"
+  - id: last_muted
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: showing_output
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: page_lock
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+uart:
+  baud_rate: 9600
+  tx_pin: GPIO21
+  rx_pin: GPIO20
+
+denonavr:
+  id: avr
+
+number:
+  - platform: template
+    id: contrast
+    name: Contrast
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: slider
+    optimistic: true
+    initial_value: 0
+    on_value:
+      - lambda: |-
+          id(oled).set_contrast(x/100.0);
+  - platform: denonavr
+    zone_1:
+      volume:
+        id: volume
+        name: Main Volume
+        on_value:
+          - component.update: oled
+          - if:
+              condition:
+                lambda: return (x != std::floor(x)) && (id(last_volume) == std::floor(id(last_volume)));
+              then:
+                - script.execute:
+                    id: toggle_half
+                    show: true
+          - if:
+              condition:
+                lambda: return (x == std::floor(x)) && (id(last_volume) != std::floor(id(last_volume)));
+              then:
+                - script.execute:
+                    id: toggle_half
+                    show: false
+          - globals.set:
+              id: last_volume
+              value: !lambda "return x;"
+
+switch:
+  - platform: denonavr
+    power:
+      id: power
+      name: Power
+    zone_1:
+      mute:
+        id: main_mute
+        name: Main Mute
+        on_turn_on:
+          - lambda: |-
+              id(last_muted) = millis();
+          - script.execute: show_default
+        on_turn_off:
+          - if:
+              condition:
+                lambda: return (millis() - id(last_muted)) < 500;
+              then:
+                - script.execute: show_channels
+              else:
+                - script.execute: show_default
+      power:
+        id: main_power
+        name: Main Power
+        on_turn_on:
+          - script.execute: show_default
+        on_turn_off:
+          - script.execute: show_default
+
+text_sensor:
+  - platform: denonavr
+    input_channels:
+      id: input_channels
+      name: Input Channels
+      filters: 
+        - lambda: |-
+            if (x == "0.0") {
+              return {};
+            }
+            return x;
+      on_value:
+        - script.execute: show_channels
+    output_channels:
+      id: output_channels
+      name: Output Channels
+      on_value:
+        - logger.log: "Output Channels updated"
+    zone_1:
+      source:
+        id: main_source
+        name: Main Source
+        on_value:
+          - script.execute: show_source
+
+font:
+  - file: "fonts/seven-segment.ttf"
+    id: seg_48
+    size: 48
+    glyphs:
+      - "0123456789-"
+  - file: "fonts/seven-segment.ttf"
+    id: seg_32
+    size: 32
+    glyphs:
+      - ".5"
+  - file: 'https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_48
+    size: 48
+    glyphs:
+      - "\U000F19B2" # mdi-arrow-up-thin
+      - "\U000F19B3" # mdi-arrow-down-thin
+      - "\U000F07F4" # mdi-television-classic
+      - "\U000F059F" # mdi-web
+      - "\U000F00B0" # mdi-bluetooth-audio
+      - "\U000F186B" # mdi-audio-input-rca
+      - "\U000F0025" # mdi-album
+  - file: 'https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_24
+    size: 24
+    glyphs:
+      - "\U000F07F4" # mdi-television-classic
+      - "\U000F059F" # mdi-web
+      - "\U000F00B0" # mdi-bluetooth-audio
+      - "\U000F186B" # mdi-audio-input-rca
+      - "\U000F0025" # mdi-album
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1305 128x64"
+    id: oled
+    update_interval: 10s
+    contrast: 0%
+    pages:
+      - id: page_blank
+        lambda: |-
+          it.fill(COLOR_OFF);
+      - id: page_mute
+        lambda: |-
+          it.print(-4, 0, id(seg_48), "---");
+      - id: page_volume
+        lambda: |-
+          it.printf(74, 0, id(seg_48), TextAlign::TOP_RIGHT, "%d", (int)id(volume).state);
+          it.printf(74, id(current_height), id(seg_32), ".5");
+          auto source_icon = "";
+          if (id(main_source).state == "TV") {
+            source_icon = "\U000F07F4";
+          } else if (id(main_source).state == "NET") {
+            source_icon = "\U000F059F";
+          } else if (id(main_source).state == "BT") {
+            source_icon = "\U000F00B0";
+          } else if (id(main_source).state == "AUX1") {
+            source_icon = "\U000F186B";
+          } else if (id(main_source).state == "PHONO") {
+            source_icon = "\U000F0025";
+          }
+          if (source_icon != "") {
+            it.print(128, 0, id(icon_24), TextAlign::TOP_RIGHT, source_icon);
+          }
+      - id: page_source
+        lambda: |-
+          auto source_icon = "";
+          if (id(main_source).state == "TV") {
+            source_icon = "\U000F07F4";
+          } else if (id(main_source).state == "NET") {
+            source_icon = "\U000F059F";
+          } else if (id(main_source).state == "BT") {
+            source_icon = "\U000F00B0";
+          } else if (id(main_source).state == "AUX1") {
+            source_icon = "\U000F186B";
+          } else if (id(main_source).state == "PHONO") {
+            source_icon = "\U000F0025";
+          }
+          if (source_icon != "") {
+            it.print(64, 0, id(icon_48), TextAlign::TOP_CENTER, source_icon);
+          }
+      - id: page_channels
+        lambda: |-
+          bool out = id(showing_output);
+
+          it.rectangle(20, 0, 15, 10);
+          it.rectangle(45, 0, 20, 10);
+          it.rectangle(75, 0, 15, 10);
+          it.rectangle(0, 16, 10, 10);
+          it.rectangle(20, 38, 15, 10);
+          it.rectangle(75, 38, 15, 10);
+
+          uint8_t channels = out ? avr->get_active_output_channels() : avr->get_active_input_channels();
+          if(channels & denonavr::CHANNEL_FRONT_LEFT)
+            it.filled_rectangle(20, 0, 15, 10);
+          if(channels & denonavr::CHANNEL_CENTRE)
+            it.filled_rectangle(45, 0, 20, 10);
+          if(channels & denonavr::CHANNEL_FRONT_RIGHT)
+            it.filled_rectangle(75, 0, 15, 10);
+          if(channels & denonavr::CHANNEL_SUBWOOFER)
+            it.filled_rectangle(0, 16, 10, 10);
+          if(channels & denonavr::CHANNEL_SURROUND_LEFT)
+            it.filled_rectangle(20, 38, 15, 10);
+          if(channels & denonavr::CHANNEL_SURROUND_RIGHT)
+            it.filled_rectangle(75, 38, 15, 10);
+          
+          it.print(128, 0, id(icon_48), TextAlign::TOP_RIGHT, out ? "\U000F19B2" : "\U000F19B3");
+
+script:
+  - id: show_source
+    mode: restart
+    then:
+      - wait_until:
+          timeout: 10s
+          condition:
+            lambda: return id(page_lock) == false;
+      - globals.set:
+          id: page_lock
+          value: "true"
+      - display.page.show: page_source
+      - component.update: oled
+      - delay: 2s
+      - globals.set:
+          id: page_lock
+          value: "false"
+      - script.execute: show_default
+  - id: show_channels
+    mode: restart
+    then:
+      - wait_until:
+          timeout: 10s
+          condition:
+            lambda: return id(page_lock) == false;
+      - globals.set:
+          id: page_lock
+          value: "true"
+      - display.page.show: page_channels
+      - component.update: oled
+      - delay: 2s
+      - globals.set:
+          id: showing_output
+          value: "true"
+      - component.update: oled
+      - delay: 2s
+      - globals.set:
+          id: showing_output
+          value: "false"
+      - globals.set:
+          id: page_lock
+          value: "false"
+      - script.execute: show_default
+  - id: show_default
+    mode: restart
+    then:
+      - wait_until:
+          timeout: 10s
+          condition:
+            lambda: return id(page_lock) == false;
+      - lambda: |-
+          if (!id(main_power).state) {
+            id(oled).show_page(id(page_blank));
+            return;
+          }
+          if (id(main_mute).state) {
+            id(oled).show_page(id(page_mute));
+            return;
+          }
+          id(oled).show_page(id(page_volume));
+      - component.update: oled
+  - id: toggle_half
+    parameters:
+      show: bool
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: "return id(current_height) != (show ? 16: 64);"
+          then:
+            - lambda: |-
+                if (show) {
+                  id(current_height) -= 8;
+                } else {
+                  id(current_height) += 8;
+                };
+            - component.update: oled
+            - delay: 5ms
