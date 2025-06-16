@@ -1,8 +1,5 @@
-secrets.yaml
-
-.vscode
 .esphome
-
-archive
-
 __pycache__
+.DS_Store
+
+secrets.yaml
