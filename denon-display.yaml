@@ -8,11 +8,6 @@ packages:
 logger:
   level: DEBUG
 
-external_components:
-  - source:
-      type: local
-      path: components
-
 esp32:
   board: seeed_xiao_esp32c3
   framework:

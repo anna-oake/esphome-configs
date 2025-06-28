@@ -1,0 +1,50 @@
+esphome:
+  name: stick-bridge
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+esp32_ble_tracker:
+
+logger:
+  level: ERROR
+
+ble_client:
+  - id: ble
+    mac_address: !secret gamepad_mac
+    on_connect:
+        - logger.log:
+            format: |-
+                {"event": "connected"}
+            tag: "gamepad"
+            level: ERROR
+    on_disconnect:
+        - logger.log:
+            format: |-
+                {"event": "disconnected"}
+            tag: "gamepad"
+            level: ERROR
+
+ble_client_hid:
+    - id: hid
+      on_stick:
+        - logger.log:
+            format: |-
+                {"event": "stick", "angle": %f, "velocity": %f}
+            args: ["angle", "velocity"]
+            tag: "gamepad"
+            level: ERROR
+      on_key:
+        - logger.log:
+            format: |-
+                {"event": "key", "key": "%s", "pressed": %s}
+            args: ["key.c_str()", "pressed ? \"true\" : \"false\""]
+            tag: "gamepad"
+            level: ERROR
