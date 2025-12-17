@@ -22,4 +22,3 @@ packages:
     refresh: 300s
     files:
       - nspanel_esphome.yaml
-      - esphome/nspanel_esphome_addon_bluetooth_proxy.yaml
