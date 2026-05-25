@@ -1,0 +1,64 @@
+substitutions:
+  name: piss-tank
+  friendly_name: Piss Tank
+
+packages:
+  base: !include common/base.yaml
+
+logger:
+  level: DEBUG
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+output:
+  - platform: ledc
+    id: pump_in_1
+    pin: GPIO5
+    frequency: 100 kHz
+
+  - platform: ledc
+    id: pump_in_2
+    pin: GPIO6
+    frequency: 100 kHz
+
+  - platform: ledc
+    id: pump_pwm
+    pin: GPIO7
+    frequency: 100 kHz
+
+fan:
+  - platform: hbridge
+    id: pump
+    name: "Piss pump"
+    pin_a: pump_in_1
+    pin_b: pump_in_2
+    enable_pin: pump_pwm
+    decay_mode: fast
+
+switch:
+  - platform: gpio
+    pin: GPIO10
+    name: "Driver standby"
+
+number:
+  - platform: template
+    name: "PWM frequency"
+    optimistic: true
+    min_value: 0
+    max_value: 200000
+    step: 1000
+    initial_value: 100000
+    on_value:
+      then:
+        - output.ledc.set_frequency:
+            id: pump_in_1
+            frequency: !lambda "return x;"
+        - output.ledc.set_frequency:
+            id: pump_in_2
+            frequency: !lambda "return x;"
+        - output.ledc.set_frequency:
+            id: pump_pwm
+            frequency: !lambda "return x;"
