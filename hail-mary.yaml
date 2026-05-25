@@ -15,85 +15,62 @@ esp32:
 
 output:
   - platform: gpio
-    id: spin_standby
-    pin: GPIO10
-  - platform: gpio
-    id: spin_in_1_gpio
+    id: spin_phase
     pin: GPIO5
-  - platform: gpio
-    id: spin_in_2_gpio
-    pin: GPIO6
-  - platform: template
-    id: spin_in_1
-    type: float
-    write_action:
-      - if:
-          condition:
-            lambda: return state > 0.5;
-          then:
-            - output.turn_on: spin_in_1_gpio
-          else:
-            - output.turn_off: spin_in_1_gpio
-  - platform: template
-    id: spin_in_2
-    type: float
-    write_action:
-      - if:
-          condition:
-            lambda: return state > 0.5;
-          then:
-            - output.turn_on: spin_in_2_gpio
-          else:
-            - output.turn_off: spin_in_2_gpio
 
   - platform: ledc
     id: spin_pwm
-    pin: GPIO7
+    pin: GPIO6
     channel: 0
-    min_power: 0.45
-    zero_means_zero: true
     frequency: 20 kHz
 
   - platform: ledc
     id: led_a
     pin: GPIO0
     channel: 2
-    max_power: 0.37
     frequency: 1 kHz
 
   - platform: ledc
     id: led_b
     pin: GPIO1
-    channel: 4
-    max_power: 0.37
+    channel: 3
     frequency: 1 kHz
 
   - platform: ledc
     id: led_c
     pin: GPIO3
-    channel: 5
-    max_power: 0.33
+    channel: 4
     frequency: 1 kHz
 
-  # - platform: ledc
-  #   id: led_d
-  #   pin: GPIO4
-  #   channel: 5
-  #   frequency: 1 kHz
+  - platform: ledc
+    id: led_d
+    pin: GPIO4
+    channel: 5
+    frequency: 1 kHz
+
+  - platform: rmt_carrier_dimmer
+    id: led_w
+    pin: GPIO7
 
 fan:
-  - platform: hbridge
+  - platform: template
     id: spin
     name: "Spin"
-    pin_a: spin_in_1
-    pin_b: spin_in_2
-    enable_pin: spin_pwm
-    decay_mode: fast
+    has_direction: true
+    speed_count: 100
     icon: mdi:atom-variant
-    on_turn_on:
-      - output.turn_on: spin_standby
-    on_turn_off:
-      - output.turn_off: spin_standby
+    on_state:
+      - lambda: |-
+          bool enabled = x->state;
+          float level = enabled ? x->speed / 100.0f : 0.0f;
+
+          if (enabled && x->direction == FanDirection::REVERSE) {
+            id(spin_phase).turn_on();
+          } else {
+            id(spin_phase).turn_off();
+          }
+
+          id(spin_pwm).set_level(level);
 
 light:
   - platform: monochromatic
@@ -109,5 +86,5 @@ light:
   - platform: monochromatic
     name: "Ship"
     icon: mdi:rocket-outline
-    output: led_c
+    output: led_w
     default_transition_length: 0.3s
