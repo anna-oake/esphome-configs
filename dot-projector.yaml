@@ -1,0 +1,158 @@
+substitutions:
+  name: dot-projector
+  friendly_name: Dot Projector
+
+packages:
+  base: !include common/base.yaml
+
+esp32:
+  board: esp32dev
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  frequency: 100kHz
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+font:
+  - file:
+      type: gfonts
+      family: Roboto
+    id: roboto_24
+    size: 24
+  - file:
+      type: gfonts
+      family: Roboto
+    id: roboto_14
+    size: 14
+
+time:
+  - platform: homeassistant
+    id: ha_time
+
+color:
+  - id: flipper
+    hex: FF8200
+
+display:
+  - platform: ili9xxx
+    id: matrix
+    model: ST7735
+    dc_pin: GPIO2
+    reset_pin: GPIO4
+    cs_pin: GPIO5
+    dimensions:
+      width: 108
+      height: 111
+      offset_width: 20
+      offset_height: 17
+    invert_colors: false
+    transform:
+      swap_xy: true
+      mirror_y: true
+    color_order: bgr
+    pages:
+      - id: home
+        lambda: |-
+          // it.circle(50, 50, 50, Color::WHITE); // full area
+          // it.rectangle(15, 15, 72, 72, Color::WHITE); // fitted square
+          auto time = id(ha_time).now();
+          it.strftime(50, 25, id(roboto_14), id(flipper), TextAlign::CENTER, "%b %d", time);
+          it.strftime(50, 50, id(roboto_24), id(flipper), TextAlign::CENTER, "%H:%M:%S", time);
+          it.strftime(50, 75, id(roboto_14), id(flipper), TextAlign::CENTER, "%A", time);
+      - id: media
+        lambda: |-
+          auto time = id(ha_time).now();
+
+          auto state = id(media_state).state;
+          int position = (int)(id(media_position).state);
+          if (state == "playing") {
+            struct tm tm_utcnow = id(ha_time).utcnow().to_c_tm();
+            int diff = (int)difftime(mktime(&tm_utcnow), id(media_position_updated_at));
+            position += diff;
+          }
+          int remainSec = (int)(id(media_duration).state) - position;
+          /*
+          char remain[10];
+          if (remainSec < 60) {
+            sprintf(remain, "%ds", remainSec);
+          } else if (remainSec < 3600) {
+            sprintf(remain, "%dm%ds", remainSec / 60, remainSec % 60);
+          } else {
+            sprintf(remain, "%dh%dm", remainSec / 3600, (remainSec % 3600) / 60);
+          }
+          it.print(50, 50, id(roboto_24), TextAlign::CENTER, remain);
+          */
+          it.print(50, 25, id(roboto_14), TextAlign::CENTER, "test test");
+          it.printf(50, 50, id(roboto_24), TextAlign::CENTER, "%H:%M:%S", time);
+
+esphome:
+  on_boot:
+    then:
+      - light.turn_on: backlight
+      # - display.page.show: media
+
+output:
+  - platform: ledc
+    id: led_pwm
+    pin: GPIO32
+    frequency: 3 MHz
+light:
+  - platform: monochromatic
+    id: backlight
+    name: "Backlight"
+    output: led_pwm
+    initial_state:
+      brightness: 100%
+text_sensor:
+  - platform: homeassistant
+    id: media_state
+    entity_id: media_player.living_room_state
+  - platform: homeassistant
+    id: media_app
+    entity_id: media_player.living_room_state
+    attribute: app_name
+  - platform: homeassistant
+    id: media_artist
+    entity_id: media_player.living_room_state
+    attribute: media_artist
+  - platform: homeassistant
+    id: media_title
+    entity_id: media_player.living_room_state
+    attribute: media_title
+  - platform: homeassistant
+    id: media_content_id
+    entity_id: media_player.living_room_state
+    attribute: media_content_id
+  - platform: homeassistant
+    id: media_position_updated_at_str
+    entity_id: media_player.living_room_state
+    attribute: media_position_updated_at
+#     on_value:
+#       then:
+#         - lambda: |-
+#             struct tm tm_parsed{};
+#             strptime(x.c_str(), "%Y-%m-%d %H:%M:%S.%f%z", &tm_parsed);
+#             id(media_position_updated_at) = mktime(&tm_parsed);
+
+globals:
+  - id: media_position_updated_at
+    type: time_t
+sensor:
+  # - platform: ltr_als_ps
+  #   type: ALS # ambient-only device
+  #   update_interval: 1s
+  #   ambient_light: "Ambient Light"
+  - platform: homeassistant
+    id: media_duration
+    entity_id: media_player.living_room_state
+    attribute: media_duration
+  - platform: homeassistant
+    id: media_position
+    entity_id: media_player.living_room_state
+    attribute: media_position
