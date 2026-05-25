@@ -1,0 +1,113 @@
+substitutions:
+  name: hail-mary
+  friendly_name: Hail Mary
+
+packages:
+  base: !include common/base.yaml
+
+logger:
+  level: DEBUG
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+output:
+  - platform: gpio
+    id: spin_standby
+    pin: GPIO10
+  - platform: gpio
+    id: spin_in_1_gpio
+    pin: GPIO5
+  - platform: gpio
+    id: spin_in_2_gpio
+    pin: GPIO6
+  - platform: template
+    id: spin_in_1
+    type: float
+    write_action:
+      - if:
+          condition:
+            lambda: return state > 0.5;
+          then:
+            - output.turn_on: spin_in_1_gpio
+          else:
+            - output.turn_off: spin_in_1_gpio
+  - platform: template
+    id: spin_in_2
+    type: float
+    write_action:
+      - if:
+          condition:
+            lambda: return state > 0.5;
+          then:
+            - output.turn_on: spin_in_2_gpio
+          else:
+            - output.turn_off: spin_in_2_gpio
+
+  - platform: ledc
+    id: spin_pwm
+    pin: GPIO7
+    channel: 0
+    min_power: 0.45
+    zero_means_zero: true
+    frequency: 20 kHz
+
+  - platform: ledc
+    id: led_a
+    pin: GPIO0
+    channel: 2
+    max_power: 0.37
+    frequency: 1 kHz
+
+  - platform: ledc
+    id: led_b
+    pin: GPIO1
+    channel: 4
+    max_power: 0.37
+    frequency: 1 kHz
+
+  - platform: ledc
+    id: led_c
+    pin: GPIO3
+    channel: 5
+    max_power: 0.33
+    frequency: 1 kHz
+
+  # - platform: ledc
+  #   id: led_d
+  #   pin: GPIO4
+  #   channel: 5
+  #   frequency: 1 kHz
+
+fan:
+  - platform: hbridge
+    id: spin
+    name: "Spin"
+    pin_a: spin_in_1
+    pin_b: spin_in_2
+    enable_pin: spin_pwm
+    decay_mode: fast
+    icon: mdi:atom-variant
+    on_turn_on:
+      - output.turn_on: spin_standby
+    on_turn_off:
+      - output.turn_off: spin_standby
+
+light:
+  - platform: monochromatic
+    name: "Base"
+    icon: mdi:vector-square
+    output: led_a
+    default_transition_length: 0.3s
+  - platform: monochromatic
+    name: "Ring"
+    icon: mdi:sphere
+    output: led_b
+    default_transition_length: 0.3s
+  - platform: monochromatic
+    name: "Ship"
+    icon: mdi:rocket-outline
+    output: led_c
+    default_transition_length: 0.3s
