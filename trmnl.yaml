@@ -1,0 +1,80 @@
+substitutions:
+  name: trmnl
+  friendly_name: TRMNL
+
+packages:
+  base: !include common/base.yaml
+
+esp32:
+  board: seeed_xiao_esp32c3
+  framework:
+    type: esp-idf
+
+esphome:
+  on_boot:
+    then:
+      - output.turn_on: display_pwr
+
+font:
+  - id: roboto_16
+    file: gfonts://Roboto
+    size: 16
+  - id: roboto_32
+    file: gfonts://Roboto
+    size: 32
+
+spi:
+  mosi_pin: GPIO10
+  clk_pin: GPIO8
+
+output:
+  - platform: gpio
+    pin: GPIO21
+    id: display_pwr
+
+display:
+  platform: waveshare_epaper
+  id: trmnl_display
+  cs_pin: GPIO3
+  model: 7.50inV2p
+  update_interval: 10s
+  full_update_every: 10
+  dc_pin: GPIO5
+  reset_pin: GPIO2
+  busy_pin:
+    number: GPIO4
+    inverted: true
+  rotation: 180
+  pages:
+    - id: main_page
+      lambda: |-
+        it.print(100, 100, id(roboto_32), "miaow miaow miaow :3 mrrp");
+        // it.printf(100, 200, id(roboto_32), "Uptime: %d seconds", millis() / 1000);
+
+        // it.printf(750, 430, id(roboto_16), TextAlign::BOTTOM_RIGHT, "Battery: %.2fV", id(battery_voltage).state);
+    - id: blank_page
+      lambda: |-
+        it.fill(COLOR_ON);
+
+binary_sensor:
+  - platform: gpio
+    name: Button
+    id: back_button
+    pin:
+      number: GPIO9
+      inverted: true
+
+# sensor:
+#   - platform: adc
+#     name: Battery Voltage
+#     id: battery_voltage
+#     pin: GPIO3
+#     attenuation: 12db
+#     samples: 128
+#     filters:
+#       - multiply: 2.0
+
+button:
+  - platform: restart
+    name: Restart
+    id: restart_button
