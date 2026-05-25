@@ -305,6 +305,42 @@ sensor:
     value_type: U_WORD
     unit_of_measurement: "%"
 
+  # Current active HRU fault code
+  - platform: modbus_controller
+    modbus_controller_id: itho_ventilation
+    name: "fault number"
+    id: hru_fault_number
+    register_type: holding
+    address: 199
+    value_type: U_WORD
+
+  # Summer bypass
+  # Reported convention in the HRU400 ESPHome repo:
+  #   0   = bypass open
+  #   550 = bypass closed
+  # The repo author commented that this register did not update on their unit,
+  # but it is safe and useful to try reading it on yours.
+  - platform: modbus_controller
+    modbus_controller_id: itho_ventilation
+    name: "bypass valve position"
+    id: hru_bypass_valve_position
+    register_type: holding
+    address: 2032
+    value_type: U_WORD
+    unit_of_measurement: "steps"
+
+  # Raw bypass manual/automatic control register.
+  # Keep this read-only for now:
+  #   0 = automatic control
+  #   1 = manual/forced control
+  - platform: modbus_controller
+    modbus_controller_id: itho_ventilation
+    name: "bypass manual mode"
+    id: hru_bypass_manual_mode
+    register_type: holding
+    address: 2033
+    value_type: U_WORD
+
 number:
   - platform: modbus_controller
     modbus_controller_id: itho_ventilation
